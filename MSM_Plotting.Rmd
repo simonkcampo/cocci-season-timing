@@ -15,9 +15,9 @@ library(dlnm)
 MODELING
 1. Loading in data
 ```{r}
-msm.data.census <- read.csv('~/Desktop/thesis_project/msm.data.census2023.csv') %>% arrange(GEOID, first_day)
+msm.data.census <- read.csv('Data/msm.data.census2023.csv') %>% arrange(GEOID, first_day)
 
-msm.data.county <- read.csv('~/Desktop/thesis_project/msm.data.county2023.csv')%>% arrange(county1, first_day)
+msm.data.county <- read.csv('Data/msm.data.county2023.csv')%>% arrange(county1, first_day)
 ```
 
 
@@ -80,9 +80,6 @@ ppt.end <- crosspred(ppt.county.cb, coef = county.ppt.dlm$estimates[c(4,6,8)],
 tmean.onset <- crosspred(tmean.county.cb, coef = county.ppt.dlm$estimates[c(9,11,13)],
                    vcov = county.ppt.dlm$covmat[c(9,11,13),c(9,11,13)],
                    model.link = 'log')
-# tmean.peak <- crosspred(tmean.county.cb, coef = county.tmean.dlm$estimates[c(5,8,11,14)],
-#                    vcov = county.tmean.dlm$covmat[c(5,8,11,14),c(5,8,11,14)],
-#                    model.link = 'log')
 tmean.end <- crosspred(tmean.county.cb, coef = county.ppt.dlm$estimates[c(10,12,14)],
                    vcov = county.ppt.dlm$covmat[c(10,12,14),c(10,12,14)],
                    model.link = 'log')
@@ -117,7 +114,7 @@ tmean.df <- data.frame(exposure = 'Mean Temperature',
 
 results.plot <- rbind(ppt.df, tmean.df) %>% 
   mutate(exposure = factor(exposure, levels = c('Precipitation','Mean Temperature')))
-#results.plot %>% dplyr::mutate(CI = paste0(round(HR,2),' ','(',round(lower,2),'-',round(upper,2),')')) %>% write.csv('~/Desktop/results.csv')
+
 
 p1 <- ggplot(subset(results.plot)) + 
   geom_hline(yintercept = 1, alpha = 0.3) +
@@ -137,7 +134,7 @@ p1 <- ggplot(subset(results.plot)) +
    scale_fill_manual(values = c('Mean Temperature' = '#bd5848','Precipitation' = '#6f87c7')) + 
   theme(strip.background = element_rect(color="black", fill="#f0f0f0")); p1
 
-png('~/Desktop/thesis_project/county_mcm_HRs.png', width = 8, height = 6, units = 'in',res = 500)
+png('Plots/county_mcm_HRs.png', width = 8, height = 6, units = 'in',res = 500)
 cowplot::plot_grid(
   p1)
 dev.off()
@@ -148,7 +145,7 @@ dev.off()
 
 Plotting census models
 ```{r}
-ppt.tmean.model <- read_rds('~/Desktop/thesis_project/ppt.tmean.two.state.2023.rds')
+ppt.tmean.model <- read_rds('ppt.tmean.two.state.2023.rds')
 
 minlag <- 2
 maxlag <- 26
@@ -245,7 +242,7 @@ p1 <- ggplot(subset(results.plot)) +
    scale_fill_manual(values = c('Mean Temperature' = '#bd5848','Precipitation' = '#6f87c7')) + 
   theme(strip.background = element_rect(color="black", fill="#f0f0f0")); p1
 
-png('~/Desktop/thesis_project/census_srm_HRs.png', width = 8, height = 6, units = 'in',res = 500)
+png('Plots/census_srm_HRs.png', width = 8, height = 6, units = 'in',res = 500)
 cowplot::plot_grid(
   p1)
 dev.off()
