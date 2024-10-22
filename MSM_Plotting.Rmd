@@ -1,0 +1,253 @@
+---
+title: "MSM.Modeling"
+author: "Simon Campo"
+date: "3/12/2022"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(msm)
+library(dlnm)
+```
+
+MODELING
+1. Loading in data
+```{r}
+msm.data.census <- read.csv('~/Desktop/thesis_project/msm.data.census2023.csv') %>% arrange(GEOID, first_day)
+
+msm.data.county <- read.csv('~/Desktop/thesis_project/msm.data.county2023.csv')%>% arrange(county1, first_day)
+```
+
+
+
+Creating distributed lags
+Lags to include
+- Median time from symptoms to diagnosis = 55 days (IQR 22 - 143) (Tsang et al.)
+- Incubation period = 1-4 weeks (Galgiani)
+- Median time from exposure to diagnosis = 2 weeks + ~8 weeks = 10 weeks
+Thus, including lags 6-14 weeks
+
+Creating cross-bases
+```{r}
+library(dlnm)
+#county-level
+ppt.county.cb <- crossbasis(msm.data.county$ppt, lag=c(2,26),
+                            argvar=list(fun="lin"),
+                            arglag=list(fun="ns", df = 3),
+                            group = msm.data.county$county1)
+tmean.county.cb <- crossbasis(msm.data.county$tmean, lag=c(2,26),
+                            argvar=list(fun="lin"),
+                            arglag=list(fun="ns", df = 3),
+                            group = msm.data.county$county1)
+
+```
+
+
+Adding crossbasis variables to dataframes
+```{r}
+#county-level
+numcol <- ncol(msm.data.county)
+msm.data.county[,(numcol+1):(numcol+ncol(ppt.county.cb))] <- ppt.county.cb
+names(msm.data.county)[(numcol+1):(numcol+ncol(ppt.county.cb))] <- paste0('ppt',1:ncol(ppt.county.cb))
+numcol <- ncol(msm.data.county)
+msm.data.county[,(numcol+1):(numcol+ncol(tmean.county.cb))] <- tmean.county.cb
+names(msm.data.county)[(numcol+1):(numcol+ncol(tmean.county.cb))] <- paste0('tmean',1:ncol(tmean.county.cb))
+```
+
+County DLM MSM models
+```{r}
+#two state transition matrix
+Q <- rbind ( c(0.1, 0.1),
+              c(0.1, 0.1))
+#more accurate transition matrix
+Q.crude <- crudeinits.msm(state.mcm ~ continuous_week_onset, subject=county1, data=msm.data.county, qmatrix=Q)
+
+#sm1. and tmean
+county.ppt.dlm <- msm(state.mcm ~ continuous_week_onset, subject=county1, data = msm.data.county, qmatrix = Q.crude, 
+                      covariates = ~ ppt1 + ppt2 + ppt3 +
+                        tmean1 + tmean2 + tmean3 + tyear, exacttimes = T, 
+                      control=list(fnscale=3000, maxit = 10000), na.action = 'na.omit')
+
+ppt.onset <- crosspred(ppt.county.cb, coef = county.ppt.dlm$estimates[c(3,5,7)],
+                   vcov = county.ppt.dlm$covmat[c(3,5,7),c(3,5,7)],
+                   model.link = 'log')
+ppt.end <- crosspred(ppt.county.cb, coef = county.ppt.dlm$estimates[c(4,6,8)],
+                   vcov = county.ppt.dlm$covmat[c(4,6,8),c(4,6,8)],
+                   model.link = 'log')
+
+tmean.onset <- crosspred(tmean.county.cb, coef = county.ppt.dlm$estimates[c(9,11,13)],
+                   vcov = county.ppt.dlm$covmat[c(9,11,13),c(9,11,13)],
+                   model.link = 'log')
+# tmean.peak <- crosspred(tmean.county.cb, coef = county.tmean.dlm$estimates[c(5,8,11,14)],
+#                    vcov = county.tmean.dlm$covmat[c(5,8,11,14),c(5,8,11,14)],
+#                    model.link = 'log')
+tmean.end <- crosspred(tmean.county.cb, coef = county.ppt.dlm$estimates[c(10,12,14)],
+                   vcov = county.ppt.dlm$covmat[c(10,12,14),c(10,12,14)],
+                   model.link = 'log')
+```
+
+Plotting County-level model results
+```{r}
+ppt.df <- data.frame(exposure = 'Precipitation',
+                     transition = factor(c(rep('Onset',25),rep('End',25)),
+                                         levels = c('Onset','End')),
+                     lag = factor(c(rep(2:26,2))),
+                     HR = c(ppt.onset$matRRfit[which(ppt.onset$predvar == 10),],
+                            ppt.end$matRRfit[which(ppt.onset$predvar == 10),]),
+                     upper = c(ppt.onset$matRRhigh[which(ppt.onset$predvar == 10),],
+                               ppt.end$matRRhigh[which(ppt.onset$predvar == 10),]),
+                     lower = c(ppt.onset$matRRlow[which(ppt.onset$predvar == 10),],
+                               ppt.end$matRRlow[which(ppt.onset$predvar == 10),]))
+
+#tmean 
+tmean.df <- data.frame(exposure = 'Mean Temperature',
+                       transition = factor(c(rep('Onset',25), rep('End',25)),
+                                           levels = c('Onset','End')),
+                     lag = factor(c(rep(2:26,2))),
+                     HR = c(tmean.onset$matRRfit[which(tmean.onset$predvar == 1),],
+                            tmean.end$matRRfit[which(tmean.onset$predvar == 1),]),
+                     upper = c(tmean.onset$matRRhigh[which(tmean.onset$predvar == 1),],
+                               tmean.end$matRRhigh[which(tmean.onset$predvar == 1),]),
+                     lower = c(tmean.onset$matRRlow[which(tmean.onset$predvar == 1),],
+                               tmean.end$matRRlow[which(tmean.onset$predvar == 1),]))
+
+
+
+results.plot <- rbind(ppt.df, tmean.df) %>% 
+  mutate(exposure = factor(exposure, levels = c('Precipitation','Mean Temperature')))
+#results.plot %>% dplyr::mutate(CI = paste0(round(HR,2),' ','(',round(lower,2),'-',round(upper,2),')')) %>% write.csv('~/Desktop/results.csv')
+
+p1 <- ggplot(subset(results.plot)) + 
+  geom_hline(yintercept = 1, alpha = 0.3) +
+  geom_line(aes(lag, HR, group = exposure, color = exposure), linewidth = 1) + 
+  geom_ribbon(aes(x = lag, ymin = lower, ymax = upper, group = exposure, fill = exposure), 
+              alpha = 0.4) + 
+  labs(y = 'Hazard Ratio',
+       x = 'Lag (Weeks)') +
+  facet_grid(exposure~transition, scales = 'free_y') + theme_classic() + 
+  scale_x_discrete(breaks = c(0,5,10,15,20, 25), limits = rev) +
+  theme(legend.position = "none",
+        panel.border = element_rect(color = "#bababa", fill = NA, linewidth = 0.5),
+        panel.spacing = unit(.4, "lines"),
+        text = element_text(size=15)) + 
+  coord_cartesian(xlim = c(0,26)) +
+  scale_color_manual(values = c('Mean Temperature' = '#bd5848','Precipitation' = '#6f87c7')) + 
+   scale_fill_manual(values = c('Mean Temperature' = '#bd5848','Precipitation' = '#6f87c7')) + 
+  theme(strip.background = element_rect(color="black", fill="#f0f0f0")); p1
+
+png('~/Desktop/thesis_project/county_mcm_HRs.png', width = 8, height = 6, units = 'in',res = 500)
+cowplot::plot_grid(
+  p1)
+dev.off()
+
+```
+
+
+
+Plotting census models
+```{r}
+ppt.tmean.model <- read_rds('~/Desktop/thesis_project/ppt.tmean.two.state.2023.rds')
+
+minlag <- 2
+maxlag <- 26
+
+ppt.census.cb <- crossbasis(msm.data.census$ppt,lag=c(minlag,maxlag), #creating lag-response variables
+                            argvar=list(fun="lin"),
+                            arglag=list(fun="ns", df = 3),
+                            group = msm.data.census$GEOID)
+
+tmean.census.cb <- crossbasis(msm.data.census$tmean,lag=c(minlag,maxlag), #creating lag-response variables
+                              argvar=list(fun="lin"),
+                              arglag=list(fun="ns", df = 3),
+                              group = msm.data.census$GEOID)
+
+#Crosspred
+ppt.onset <- crosspred(ppt.census.cb, coef = ppt.tmean.model$estimates[seq(3,by = 2, length.out = ncol(ppt.census.cb))],
+                   vcov = ppt.tmean.model$covmat[seq(3,by = 2, length.out = ncol(ppt.census.cb)),
+                                                 seq(3,by = 2, length.out = ncol(ppt.census.cb))],
+                   model.link = 'log',
+                   by = 1)
+
+ppt.end <- crosspred(ppt.census.cb, coef = ppt.tmean.model$estimates[seq(4,by = 2, length.out = ncol(ppt.census.cb))],
+                   vcov = ppt.tmean.model$covmat[seq(4,by = 2, length.out = ncol(ppt.census.cb)),
+                                                 seq(4,by = 2, length.out = ncol(ppt.census.cb))],
+                   model.link = 'log',
+                   by = 1)
+tmean.onset <- crosspred(tmean.census.cb, 
+                         coef = ppt.tmean.model$estimates[seq((3+ncol(ppt.census.cb)*2),by = 2, 
+                                                              length.out = ncol(tmean.census.cb))],
+                         vcov = ppt.tmean.model$covmat[seq((3+ncol(ppt.census.cb)*2),by = 2, 
+                                                           length.out = ncol(tmean.census.cb)),
+                                                       seq((3+ncol(ppt.census.cb)*2),by = 2, 
+                                                           length.out = ncol(tmean.census.cb))],
+                   model.link = 'log',
+                   by = 1)
+
+tmean.end <- crosspred(tmean.census.cb, 
+                       coef = ppt.tmean.model$estimates[seq((4+ncol(ppt.census.cb)*2),by = 2, 
+                                                            length.out = ncol(tmean.census.cb))],
+                   vcov = ppt.tmean.model$covmat[seq((4+ncol(ppt.census.cb)*2),by = 2, 
+                                                     length.out = ncol(tmean.census.cb)),
+                                                 seq((4+ncol(ppt.census.cb)*2),by = 2, 
+                                                     length.out = ncol(tmean.census.cb))],
+                   model.link = 'log',
+                   by = 1)
+
+```
+
+```{r}
+ppt.df <- data.frame(exposure = 'Precipitation',
+                     transition = factor(c(rep('Onset',25),rep('End',25)),
+                                         levels = c('Onset','End')),
+                     lag = factor(c(rep(2:26,2))),
+                     HR = c(ppt.onset$matRRfit[which(ppt.onset$predvar == 10),],
+                            ppt.end$matRRfit[which(ppt.onset$predvar == 10),]),
+                     upper = c(ppt.onset$matRRhigh[which(ppt.onset$predvar == 10),],
+                               ppt.end$matRRhigh[which(ppt.onset$predvar == 10),]),
+                     lower = c(ppt.onset$matRRlow[which(ppt.onset$predvar == 10),],
+                               ppt.end$matRRlow[which(ppt.onset$predvar == 10),]))
+
+#tmean 
+tmean.df <- data.frame(exposure = 'Mean Temperature',
+                       transition = factor(c(rep('Onset',25), rep('End',25)),
+                                           levels = c('Onset','End')),
+                     lag = factor(c(rep(2:26,2))),
+                     HR = c(tmean.onset$matRRfit[which(tmean.onset$predvar == 1),],
+                            tmean.end$matRRfit[which(tmean.onset$predvar == 1),]),
+                     upper = c(tmean.onset$matRRhigh[which(tmean.onset$predvar == 1),],
+                               tmean.end$matRRhigh[which(tmean.onset$predvar == 1),]),
+                     lower = c(tmean.onset$matRRlow[which(tmean.onset$predvar == 1),],
+                               tmean.end$matRRlow[which(tmean.onset$predvar == 1),]))
+
+
+results.plot <- rbind(ppt.df, tmean.df) %>% 
+  mutate(exposure = factor(exposure, levels = c('Precipitation','Mean Temperature')))
+
+results.plot %>% dplyr::mutate(CI = paste0(formatC(results.plot$HR,digits = 2, format = 'f'),' ','(',formatC(lower,digits = 2, format = 'f'),'-',formatC(upper,digits = 2, format = 'f'),')')) %>% write.csv('~/Desktop/results.csv')
+
+p1 <- ggplot(subset(results.plot)) + 
+  geom_hline(yintercept = 1, alpha = 0.3) +
+  geom_line(aes(lag, HR, group = exposure, color = exposure), linewidth = 1) + 
+  geom_ribbon(aes(x = lag, ymin = lower, ymax = upper, group = exposure, fill = exposure), 
+              alpha = 0.4) + 
+  labs(y = 'Hazard Ratio',
+       x = 'Lag (Weeks)') +
+  facet_grid(exposure~transition, scales = 'free_y') + theme_classic() + 
+  scale_x_discrete(breaks = c(0,5,10,15,20, 25), limits = rev) +
+  theme(legend.position = "none",
+        panel.border = element_rect(color = "#bababa", fill = NA, linewidth = 0.5),
+        panel.spacing = unit(.4, "lines"),
+        text = element_text(size=15)) + 
+  coord_cartesian(xlim = c(0,26)) +
+  scale_color_manual(values = c('Mean Temperature' = '#bd5848','Precipitation' = '#6f87c7')) + 
+   scale_fill_manual(values = c('Mean Temperature' = '#bd5848','Precipitation' = '#6f87c7')) + 
+  theme(strip.background = element_rect(color="black", fill="#f0f0f0")); p1
+
+png('~/Desktop/thesis_project/census_srm_HRs.png', width = 8, height = 6, units = 'in',res = 500)
+cowplot::plot_grid(
+  p1)
+dev.off()
+
+```
