@@ -6,59 +6,72 @@ library(ggbrace)
 setwd('~/Desktop/Season Timing')
 msm.data.census <- read.csv('msm.data.census2023.csv', colClasses = c('GEOID' = 'character'))
 msm.data.county <- read.csv('msm.data.county2023.csv')
+## Descriptive stats
 
-###################### Descriptive stats ######################################
-
-# number of total seasonal census tract years included
-msm.data.census %>% dplyr::select(c, epi.start.srm) %>% 
-  distinct() %>% dplyr::filter(!is.na(epi.start.srm)) %>% nrow()
-
-# number of census tract years detected as seasonal with at least two cases
-msm.data.census %>% group_by(c) %>% 
-  dplyr::summarise(cases = sum(N), seasonal = !all(is.na(epi.start.srm))) %>% 
-  dplyr::filter(cases >= 2) %>% dplyr::summarise(years = n(), seasonal = sum(seasonal))
-
-# number of seasonal census tract years in each county
-msm.data.census %>% dplyr::select(c, county1, epi.start.srm) %>% 
-  distinct() %>% dplyr::filter(!is.na(epi.start.srm)) %>% 
+# number of total seasonal census tract years
+msm.data.census %>% dplyr::select(c, epi.start.srm) %>% distinct() %>% dplyr::filter(!is.na(epi.start.srm)) %>% nrow()
+msm.data.census %>% group_by(c) %>% dplyr::summarise(cases = sum(N), seasonal = !all(is.na(epi.start.srm))) %>% dplyr::filter(cases >= 2) %>% dplyr::summarise(years = n(), seasonal = sum(seasonal))
+msm.data.census %>% dplyr::select(c, county1, epi.start.srm) %>% distinct() %>% dplyr::filter(!is.na(epi.start.srm)) %>% 
   group_by(county1) %>% summarise(N = n()) %>% arrange(-N)
 
-# variation in onset, end, and duration over time
+# Comparison of timing estimation methods
+comp <- msm.data.county %>% dplyr::select(c, epi.start.srm, epi.end.srm, epi.duration.srm,
+                                          epi.start.mcm, epi.end.mcm, epi.duration.mcm) %>% distinct()
+
 msm.data.census %>% group_by(tyear) %>% dplyr::summarize(mean_onset = mean(epi.start.srm, na.rm = T),
                                                   mean_end = mean(epi.end.srm, na.rm = T),
                                                   mean_duration = mean(epi.duration.srm, na.rm = T)) %>% arrange(-mean_duration)
 
-# variation in onset, end, and duration over space
 msm.data.census %>% group_by(county1) %>% dplyr::summarize(mean_onset = mean(epi.start.srm, na.rm = T),
                                                   mean_end = mean(epi.end.srm, na.rm = T),
                                                   mean_duration = mean(epi.duration.srm, na.rm = T)) %>% arrange(-mean_duration)
 
-# Correlation between different onset and end detection methods
-comparison <- msm.data.county %>% dplyr::select(c, epi.start.srm, epi.end.srm, epi.start.mcm, epi.end.mcm)
-comparison <- comparison %>% dplyr::filter(!is.na(epi.start.srm))
-cor.test(comparison$epi.start.srm, comparison$epi.start.mcm)
-cor.test(comparison$epi.end.srm, comparison$epi.end.mcm)
-cor(msm.data.county$epi.start.srm, msm.data.county$epi.start.mcm, use = 'complete.obs')
-cor(msm.data.county$epi.end.srm, msm.data.county$epi.end.mcm,use = 'complete.obs')
 
+### Variability in season timing figure ######
+msm.data.census <- msm.data.census %>% rename(onset.srm = epi.start.srm, end.srm = epi.end.srm)
+msm.data.census %>% dplyr::select(onset.srm, end.srm) %>% distinct() %>% 
+  pivot_longer(cols = c(onset.srm, end.srm), values_to = 'time', names_to = 'transition') %>%
+  mutate(transition = factor(case_when(transition == 'onset.srm'~ 'Season Onset',
+                                transition == 'end.srm' ~ 'Season End'),
+                             levels = c('Season Onset', 'Season End'))) %>% 
+  group_by(transition) %>% mutate(mean = mean(time, na.rm = T)) %>% ungroup() %>%
+  ggplot() + 
+    geom_vline(aes(xintercept = mean, col = transition), linewidth = 1.5, linetype = 'dashed') +
+  geom_histogram(aes(time, fill = transition),alpha = 0.8, position = 'identity') + 
+  scale_x_continuous(breaks = seq(0,53, 53/12)[-13], labels = month.abb[c(4:12,1:3)],
+                     limits = c(2,54)) + 
+  scale_y_continuous(breaks = c(0,50,100,150), labels = c(' ',' ',' ',' ')) +
+  scale_color_manual(values = c('#1b9e77','#7570b3')) +
+  scale_fill_manual(values = c('#1b9e77','#7570b3')) +
+  labs(x = 'Month', y = ' ', fill = NULL, col = NULL) + 
+  theme_bw() + 
+  theme(text = element_text(size = 20),
+        axis.ticks.y = element_blank())
 
-###############################################################################
+ggsave('~/Desktop/CSG Figures/timing_means.png', width = 9, height = 6, units = 'in', dpi = 400)
 
-################################ Fig 1 ########################################
-
+# Fig 1
 cts <- tigris::tracts(state = '06', year = 2017)
 GEOIDs_in_div <- read.csv('Data/GEOIDs_in_Divided_Counties.csv',
                           colClasses = c('GEOID' = 'character'))
 included_counties <- c('WFresno','WKern','Kings','WTulare','EKern','WMadera', 
                        'Monterey', 'San Luis Obispo', 'Santa Barbara', 'Ventura',
                        'Merced','San Joaquin','Stanislaus','NLA')
-
-# Remove tracts along coastline
 counties <- dplyr::filter(cts, GEOID %in% GEOIDs_in_div$GEOID) %>% 
   dplyr::filter(GEOID != '06083980100',GEOID != '06083990000', GEOID != '06111003612', GEOID != '06111980000') %>%
   dplyr::filter(ALAND != 0) %>% left_join(GEOIDs_in_div, by = 'GEOID') %>% 
   dplyr::filter(county1 %in% included_counties) %>% group_by(county1) %>% dplyr::summarize(geometry = st_union(geometry))
 
+
+counties <- counties %>% mutate(Region = case_when(county1 %in% c('WFresno','WKern','Kings','WTulare','EKern','WMadera') ~ 'Southern SJV',
+                                                   county1 %in% c('Monterey', 'San Luis Obispo', 'Santa Barbara', 'Ventura') ~ 'Central Coast',
+                                                   county1 %in% c('Merced','San Joaquin','Stanislaus') ~ 'Northern SJV',
+                                                   county1 %in% c('NLA') ~ 'Southern Coast'),
+                                Region = factor(Region, levels = c('Northern SJV',
+                                                                   'Central Coast',
+                                                                   'Southern Coast',
+                                                                   'Southern SJV')),
+                                Study_Area = 'Study Area')
 
 CA_counties <- tigris::counties(state = '06')
 dataFrame <- read_rds('~/Desktop/Projections/full_projection_data2.rds')
@@ -67,8 +80,6 @@ county_IR[, mean_IR := ifelse(mean_IR == 0, 0.4261860, mean_IR)]
 CA_counties <- merge(CA_counties, county_IR, by.x = 'NAME', by.y = 'county')
 GEOIDs_in_div <- read.csv('Data/GEOIDs_in_Divided_Counties.csv',
                           colClasses = c('GEOID' = 'character'))
-
-# Remove tracts along coastline
 census_tracts <- st_read('~/Desktop/Shapefiles/California_CensusTracts_tl_2017_06_tract/tl_2017_06_tract.shp') %>%
   dplyr::filter(GEOID %in% GEOIDs_in_div[GEOIDs_in_div$county1 %in% included_counties,]$GEOID) %>%
   dplyr::filter(GEOID != '06083980100',GEOID != '06083990000', GEOID != '06111003612', GEOID != '06111980000') %>%
@@ -100,6 +111,7 @@ p2 <- ggplot(census_tracts) + geom_sf(aes(fill = N), col = 'gray', linewidth = 0
   theme(legend.position = c(0.85,0.8),
         text = element_text(size = 14)) ; p2
 
+x11(type = 'cairo')
 ppt_ct <- msm.data.census %>% group_by(GEOID, tyear) %>% summarise(ppt = mean(ppt), tmean = mean(tmean)) %>% ungroup() %>% 
   group_by(GEOID) %>% summarise(ppt = mean(ppt), tmean = mean(tmean))
 ppt_ct <- msm.data.census %>% group_by(GEOID) %>% summarise(ppt = mean(ppt), tmean = mean(tmean)) %>% ungroup() %>% 
@@ -132,13 +144,28 @@ plot_grid(
   nrow = 1,
   ncol = 4,
   align = 'vh',
+  #axis = 'tb',
   labels = c('A','B','C','D')
 )
 dev.off()
 
-###############################################################################
+## Figure 3: Example of seasonal states
+msm.data.county <- read.csv('Data/msm.data.county.csv')
+msm.data.county %>% filter(county1 == 'WKern', tyear == '2016/2017') %>% 
+  ggplot() + geom_line(aes(tweek, smooth7)) + 
+  geom_vline(aes(xintercept = epi.start.srm), linetype = 'dashed') + 
+  geom_vline(aes(xintercept = epi.end.srm), linetype = 'dashed') + theme_bw() +
+  labs(x = 'Week (since Apr.1)', y = 'Incidence Rate (per 100,000)') + 
+  annotate('text', label = 'Aseasonal \n(State 1)', x = 7, y = 7.5, size = 5) + 
+  annotate('text', label = 'Seasonal \n(State 2)', x = 30, y = 7.5, size = 5) + 
+  annotate('text', label = 'Aseasonal \n(State 1)', x = 50, y = 7.5, size = 5)+ 
+  annotate('text', label = 'Onset', x = 15.31921, y = 2.25, size = 5)+ 
+  annotate('text', label = 'End', x = 44.12462, y = 2.25, size = 5) + 
+  coord_cartesian(ylim = c(3,13), clip = 'off')
+ggsave('~/Desktop/CSG Figures/season_example.png', width = 9, height = 6, units = 'in', dpi = 300)
 
-# Figure 2 #
+
+# Figure 4
 
 descript <- msm.data.census %>% dplyr::select(GEOID, tyear, county1,
                                               epi.start.srm, epi.end.srm,
@@ -153,11 +180,34 @@ descript <- descript %>% mutate(Region = case_when(county1 %in% c('WFresno','WKe
                                                                    'Southern SJV')))
 descript <- descript %>% dplyr::filter(!is.na(epi.start.srm))
 
+#Trends by Region
+descript %>% group_by(Region) %>% dplyr::summarize(mean.onset = mean(onset.srm, na.rm = T),
+                                                  mean.peak = median(peak.srm, na.rm = T),
+                                                  mean.end = mean(end.srm, na.rm = T),
+                                                  mean.duration = mean(end.srm - onset.srm, na.rm = T))
+
+# Lat long association
+# summary(glm(onset.srm - end.srm ~ lat + long, data = descript))
+
+## Plotting
+# order.county <- descript %>% group_by(Region) %>% arrange(median.duration, .by_group = T) %>% pull(county2) %>% unique() 
+# descript <- descript %>% mutate(county2 = factor(county2, levels = order.county))
+# bins <- descript %>% dplyr::select(Region, county2, median.duration) %>% distinct() %>% 
+#   mutate(median.bin = cut(median.duration, breaks = round(seq(0,52,52/12),2)[8:12],                                                                   labels = c('Nov','Dec','Jan','Feb')))
+
+
+# descript.plot <- merge(descript, bins, by = c('Region','county2'))
+# pal <- paletteer::paletteer_d("rcartocolor::Teal")[c(1,3,5,7)]
 bounds <- descript %>% group_by(county1) %>% dplyr::summarize(onset_upperIQR = quantile(epi.start.srm, probs = 0.75, na.rm = T),
                                           onset_lowerIQR = quantile(epi.start.srm, probs = 0.25, na.rm = T),
+                                          # onset_median = quantile(epi.start.srm, probs = 0.50, na.rm = T),
                                           onset_median = mean(epi.start.srm, na.rm = T),
+                                          # peak_upperIQR = quantile(peak.srm, probs = 0.75, na.rm = T),
+                                          # peak_lowerIQR = quantile(peak.srm, probs = 0.25, na.rm = T),
+                                          # peak_median = quantile(peak.srm, probs = 0.50, na.rm = T),
                                           end_upperIQR = quantile(epi.end.srm, probs = 0.75, na.rm = T),
                                           end_lowerIQR = quantile(epi.end.srm, probs = 0.25, na.rm = T),
+                                          #end_median = quantile(epi.end.srm, probs = 0.50, na.rm = T),
                                           end_median = mean(epi.end.srm, na.rm = T)) %>%
   mutate(county21 = factor(county1, levels = rev(c('Merced','San Joaquin','Stanislaus', 
                                               'Monterey', 'San Luis Obispo', 'Santa Barbara',  'Ventura',
@@ -219,22 +269,4 @@ ggplot(data = bounds) +
   theme(text = element_text(size = 20), legend.position = 'top', panel.spacing=unit(1,"lines"),
         strip.text.y.right = element_text(angle = 0), strip.background = element_rect(color="black", fill="#f0f0f0"))
 
-ggsave('Plots/timing_distributions.png', width = 14, height =8, units = 'in', dpi = 600)
-
-
-
-####################### Example of seasonal states ############################
-msm.data.county <- read.csv('Data/msm.data.county.csv')
-msm.data.county %>% filter(county1 == 'WKern', tyear == '2016/2017') %>% 
-  ggplot() + geom_line(aes(tweek, smooth7)) + 
-  geom_vline(aes(xintercept = epi.start.srm), linetype = 'dashed') + 
-  geom_vline(aes(xintercept = epi.end.srm), linetype = 'dashed') + theme_bw() +
-  labs(x = 'Week (since Apr.1)', y = 'Incidence Rate (per 100,000)') + 
-  annotate('text', label = 'Aseasonal \n(State 1)', x = 7, y = 7.5, size = 5) + 
-  annotate('text', label = 'Seasonal \n(State 2)', x = 30, y = 7.5, size = 5) + 
-  annotate('text', label = 'Aseasonal \n(State 1)', x = 50, y = 7.5, size = 5)+ 
-  annotate('text', label = 'Onset', x = 15.31921, y = 2.25, size = 5)+ 
-  annotate('text', label = 'End', x = 44.12462, y = 2.25, size = 5) + 
-  coord_cartesian(ylim = c(3,13), clip = 'off')
-ggsave('Plots/season_example.png', width = 9, height = 6, units = 'in', dpi = 300)
-
+ggsave('Plots/Fig3.png', width = 14, height =8, units = 'in', dpi = 600)

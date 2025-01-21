@@ -15,21 +15,14 @@ library(dlnm)
 MODELING
 1. Loading in data
 ```{r}
-msm.data.census <- read.csv('Data/msm.data.census2023.csv') %>% arrange(GEOID, first_day)
+msm.data.census <- read.csv('~/Desktop/Season Timing/msm.data.census2023.csv') %>% arrange(GEOID, first_day)
 
-msm.data.county <- read.csv('Data/msm.data.county2023.csv')%>% arrange(county1, first_day)
+msm.data.county <- read.csv('~/Desktop/Season Timing/msm.data.county2023.csv') %>% arrange(county1, first_day)
 ```
 
+1. County-level Analysis
 
-
-Creating distributed lags
-Lags to include
-- Median time from symptoms to diagnosis = 55 days (IQR 22 - 143) (Tsang et al.)
-- Incubation period = 1-4 weeks (Galgiani)
-- Median time from exposure to diagnosis = 2 weeks + ~8 weeks = 10 weeks
-Thus, including lags 6-14 weeks
-
-Creating cross-bases
+Creating DLM cross-basis matrices
 ```{r}
 library(dlnm)
 #county-level
@@ -44,10 +37,8 @@ tmean.county.cb <- crossbasis(msm.data.county$tmean, lag=c(2,26),
 
 ```
 
-
-Adding crossbasis variables to dataframes
+Adding crossbasis variables to dataframe
 ```{r}
-#county-level
 numcol <- ncol(msm.data.county)
 msm.data.county[,(numcol+1):(numcol+ncol(ppt.county.cb))] <- ppt.county.cb
 names(msm.data.county)[(numcol+1):(numcol+ncol(ppt.county.cb))] <- paste0('ppt',1:ncol(ppt.county.cb))
@@ -56,7 +47,7 @@ msm.data.county[,(numcol+1):(numcol+ncol(tmean.county.cb))] <- tmean.county.cb
 names(msm.data.county)[(numcol+1):(numcol+ncol(tmean.county.cb))] <- paste0('tmean',1:ncol(tmean.county.cb))
 ```
 
-County DLM MSM models
+Running County-level DLM MSM models
 ```{r}
 #two state transition matrix
 Q <- rbind ( c(0.1, 0.1),
@@ -64,7 +55,6 @@ Q <- rbind ( c(0.1, 0.1),
 #more accurate transition matrix
 Q.crude <- crudeinits.msm(state.mcm ~ continuous_week_onset, subject=county1, data=msm.data.county, qmatrix=Q)
 
-#sm1. and tmean
 county.ppt.dlm <- msm(state.mcm ~ continuous_week_onset, subject=county1, data = msm.data.county, qmatrix = Q.crude, 
                       covariates = ~ ppt1 + ppt2 + ppt3 +
                         tmean1 + tmean2 + tmean3 + tyear, exacttimes = T, 
@@ -141,11 +131,11 @@ dev.off()
 
 ```
 
-
+2. Census-tract level model run on supercomputing cluster. See msm_savio.R file.
 
 Plotting census models
 ```{r}
-ppt.tmean.model <- read_rds('ppt.tmean.two.state.2023.rds')
+ppt.tmean.model <- read_rds('~/Desktop/Season Timing/ppt.tmean.two.state.2023.rds')
 
 minlag <- 2
 maxlag <- 26
@@ -242,9 +232,6 @@ p1 <- ggplot(subset(results.plot)) +
    scale_fill_manual(values = c('Mean Temperature' = '#bd5848','Precipitation' = '#6f87c7')) + 
   theme(strip.background = element_rect(color="black", fill="#f0f0f0")); p1
 
-png('Plots/census_srm_HRs.png', width = 8, height = 6, units = 'in',res = 500)
-cowplot::plot_grid(
-  p1)
-dev.off()
+ggsave('~/Desktop/Season Timing/Plots/Fig4.png', width = 8, height = 6, units = 'in', dpi = 600)
 
 ```

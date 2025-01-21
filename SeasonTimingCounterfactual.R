@@ -12,7 +12,7 @@ setwd('~/Desktop/Season Timing')
 library(msm); library(tidyverse); library(dlnm); library(data.table)
 
 # Load data
-dataFrame <- fread('Data/msm.data.census2023.csv', colClasses = c('GEOID' = 'character'))[order(GEOID, first_day)] # Timing dataset
+dataFrame <- fread('msm.data.census2023.csv', colClasses = c('GEOID' = 'character'))[order(GEOID, first_day)] # Timing dataset
 msm_mod <- read_rds('ppt.tmean.two.state.2023.rds') # Model
 
 m <- length(unique(dataFrame$GEOID))
@@ -168,37 +168,11 @@ mean(apply(wet_spring_onset - dry_spring_onset, 2, mean))
 quantile(apply(wet_spring_onset - dry_spring_onset, 2, mean), probs = 0.025)
 quantile(apply(wet_spring_onset - dry_spring_onset, 2, mean), probs = 0.5)
 quantile(apply(wet_spring_onset - dry_spring_onset, 2, mean), probs = 0.975)
-hdi(apply(wet_spring_onset - dry_spring_onset, 2, mean))
-
-# # Calculate average hazard and failure functions across census tracts
-# haz <- merge(dry_spring_hazard, wet_spring_hazard, by = c('GEOID','week')) 
-# haz <- haz[, .(dry_hazard = mean(onset.prob.x),
-#         wet_hazard = mean(onset.prob.y)), .(week)][order(week)]
-# 
-# # Calculate failure function
-# haz[, ':='(dry_fail = 1- cumprod(1-dry_hazard),
-#            wet_fail = 1- cumprod(1-wet_hazard))]
-# 
-# ## Standardize failure functions by maximum
-# haz[, ':='(dry_fail_standard = dry_fail/max(dry_fail),
-#            wet_fail_standard = wet_fail/max(wet_fail))]
-# 
-# # Take 100000 samples from failure functions to get onset weeks
-# set.seed(123)
-# samps <- runif(10000, 0,1)
-# dry_spring_onset <- rep(NA, length(samps))
-# wet_spring_onset <- rep(NA, length(samps))
-# # For each probability, pull out the corresponding onset week
-# for (i in 1:length(samps)) {
-#   dry_spring_onset[i] <- which.min(abs(haz$dry_fail_standard - samps[i]))
-#   wet_spring_onset[i] <-  which.min(abs(haz$wet_fail_standard - samps[i]))
-# }
 
 # subtract weeks and calculate quantiles
 hist(wet_spring_onset - dry_spring_onset)
 quantile(wet_spring_onset - dry_spring_onset, probs = c(0.025, 0.50, 0.975))
 mean(wet_spring_onset - dry_spring_onset)
-hdi(wet_spring_onset - dry_spring_onset)
 
 ###################################################################################################
 
@@ -206,16 +180,6 @@ hdi(wet_spring_onset - dry_spring_onset)
 
 colors <- c('Wet Spring' = '#2a5b6f',
             'Dry Spring' = '#c07763') 
-
-# # Failure functions
-# ggplot(haz) +
-#   geom_line(aes(week, dry_fail_standard, col = 'Dry Spring'), linewidth = 1.2) +
-#   geom_line(aes(week, wet_fail_standard, col = 'Wet Spring'), linewidth = 1.2) +
-#     scale_color_manual(values = colors) +
-#   theme_bw() + labs(x = 'Week (since Apr. 1)', 
-#                     y = 'Cumulative Probability of Season Onset', 
-#                     color = 'Conditions') + 
-#   theme(legend.position = c(0.8, 0.2), text = element_text(size = 16))
 
 # Onset week densities
 p1 <- ggplot(data = data.frame(dry_spring_onset = apply(dry_spring_onset, 2, mean),
@@ -233,16 +197,6 @@ p1 <- ggplot(data = data.frame(dry_spring_onset = apply(dry_spring_onset, 2, mea
 ###################################################################################################
 
 ### Estimating the effect of counterfactual fall conditions on duration ###
-
-## Extract each tyear's CT-specific onset week
-
-# onsets <- unique(dataFrame[, .(GEOID = GEOID, tyear = tyear, onset = epi.start.srm)])
-
-# # Filter to only weeks FOLLOWING the onset for that transmission year
-# dry_fall <- merge(dry_fall, onsets, by = c('GEOID','tyear'))
-# dry_fall <- dry_fall[, after := tweek >= onset, .(GEOID, tyear)][after == TRUE]
-# wet_fall <- merge(wet_fall, onsets, by = c('GEOID','tyear'))
-# wet_fall <- wet_fall[, after := tweek >= onset, .(GEOID, tyear)][after == TRUE]
 
 # Calculate weekly hazards
 dry_fall_hazard <- new_hazard(dry_fall, msm_mod)
@@ -314,45 +268,7 @@ quantile(apply(wet_fall_end - dry_fall_end, 2, mean), probs = 0.025)
 quantile(apply(wet_fall_end - dry_fall_end, 2, mean), probs = 0.5)
 quantile(apply(wet_fall_end - dry_fall_end, 2, mean), probs = 0.975)
 
-# 
-# # Calculate average hazard and failure functions across census tracts
-# haz <- merge(dry_fall_hazard, wet_fall_hazard, by = c('GEOID','week')) 
-# haz <- haz[, .(dry_hazard_onset = mean(onset.prob.x),
-#                wet_hazard_onset = mean(onset.prob.y),
-#                dry_hazard = mean(end.prob.x),
-#                wet_hazard = mean(end.prob.y)), .(week)][order(week)]
-# 
-# # Calculate failure function
-# haz[, ':='(dry_fail = 1- cumprod(1-dry_hazard),
-#            wet_fail = 1- cumprod(1-wet_hazard))]
-# 
-# ## Standardize failure functions by maximum
-# haz[, ':='(dry_fail_standard = dry_fail/max(dry_fail),
-#            wet_fail_standard = wet_fail/max(wet_fail))]
-# 
-# ggplot(haz, aes(week)) +
-#   geom_line(aes(y = dry_fail), col = '#c07763', linewidth = 1.2) +
-#   geom_line(aes(y = wet_fail), col = '#2a5b6f', linewidth = 1.2) +
-#   labs(x = 'Week (since season onset)', y = 'Cumulative Probability of Season End') +
-#   theme_bw()
 
-
-# # Take 100000 samples from failure functions to get onset weeks
-# set.seed(123)
-# samps <- runif(10000, 0,1)
-# dry_fall_duration <- rep(NA, length(samps))
-# wet_fall_duration <- rep(NA, length(samps))
-# # For each probability, pull out the corresponding duration (i.e., week since season onset)
-# for (i in 1:length(samps)) {
-#   dry_fall_duration[i] <- which.min(abs(haz$dry_fail_standard - samps[i]))
-#   wet_fall_duration[i] <-  which.min(abs(haz$wet_fail_standard - samps[i]))
-# }
-# 
-# # subtract weeks and calculate quantiles
-# hist(dry_fall_duration - wet_fall_duration)
-# quantile(dry_fall_duration - wet_fall_duration, probs = c(0.025, 0.50, 0.975))
-# mean(dry_fall_duration - wet_fall_duration)
-# hdi(dry_fall_duration - wet_fall_duration)
 ###################################################################################################
 
 ### Visualize Results ### 
